@@ -249,6 +249,22 @@ def load_profile(rows):
     return read_matrix(rows, {"target": 3, "var": 2, "entity": 4, "start": 6}, allowed_vars=None)
 
 
+def load_profile_total(rows):
+    data = defaultdict(lambda: defaultdict(dict))
+    total_row = next((row for row in rows if row and row[0] == "Total"), None)
+    if not total_row:
+        return data
+    header_rows = {"target": 3, "var": 2, "entity": 4}
+    max_cols = max(len(r) for r in rows[: header_rows["entity"] + 1])
+    for i in range(1, max_cols):
+        target = rows[header_rows["target"]][i] if i < len(rows[header_rows["target"]]) else ""
+        entity = rows[header_rows["entity"]][i] if i < len(rows[header_rows["entity"]]) else ""
+        ch = channel_for(entity)
+        if target and ch:
+            data[target][ch["key"]]["adh"] = fnum(total_row[i] if i < len(total_row) else "")
+    return data
+
+
 def load_rankings(current_book, previous_book):
     sheet_map = {"globo": "Globo", "record": "Record", "sbt": "SBT", "band": "BAND"}
     rankings = {}
@@ -363,13 +379,45 @@ def build_data():
                 "percent": pct(mins / total_minutes * 100 if total_minutes else 0),
                 "hours": f"{mins // 60}h{mins % 60:02d}",
             }
-        )
+    )
 
     def adh(name, target, key):
         bucket = profile.get(name, {}).get(target, {}).get(key, {}) or {}
         return bucket.get("adh") if "adh" in bucket else next(iter(bucket.values()), None)
 
+    profile_total = load_profile_total(profile_book["Crosstab1"])
+
+    def total_adh(target, key):
+        bucket = profile_total.get(target, {}).get(key, {}) or {}
+        return bucket.get("adh") if "adh" in bucket else next(iter(bucket.values()), None)
+
     profile_data = {}
+    profile_data["07h-24h"] = {}
+    for ch in LEADERSHIP_CHANNELS:
+        metrics = next((row for row in summary_bars if row["key"] == ch["key"]), {})
+        profile_data["07h-24h"][ch["key"]] = {
+            "aud": metrics.get("aud"),
+            "share": metrics.get("share"),
+            "gender": {
+                "Homem": total_adh("Masculino", ch["key"]),
+                "Mulher": total_adh("Feminino", ch["key"]),
+            },
+            "classes": {
+                "AB1": total_adh("AB1", ch["key"]),
+                "B2": total_adh("B2", ch["key"]),
+                "C1": total_adh("C1", ch["key"]),
+                "C2": total_adh("C2", ch["key"]),
+                "DE": total_adh("DE", ch["key"]),
+            },
+            "ages": {
+                "4-11": total_adh("4-11 anos", ch["key"]),
+                "12-17": total_adh("12-17 anos", ch["key"]),
+                "18-24": total_adh("18-24 anos", ch["key"]),
+                "25-34": total_adh("25-34 anos", ch["key"]),
+                "35-49": total_adh("35-49 anos", ch["key"]),
+                "50+": total_adh("50+", ch["key"]),
+            },
+        }
     for p in programs:
         name = p["name"]
         pcomp = competition.get(name, {})
@@ -630,6 +678,7 @@ function buildDailyInsights(selectedKey='globo'){{
 }}
 function renderResumo(){{const d=new Date(DATA.meta.date+'T00:00:00');document.getElementById('dateLabel').className='date-pill';document.getElementById('dateLabel').innerHTML=`<span>${{DATA.meta.weekday}}</span><strong>${{d.toLocaleDateString('pt-BR')}}</strong>`;document.getElementById('dailyAvg').textContent=fmt(DATA.meta.dailyAvg,2);const globoLogo=document.getElementById('globoKpiLogo');if(globoLogo&&channelMap.globo?.logoData)globoLogo.src=channelMap.globo.logoData;document.getElementById('sourceNote').textContent=sourceText();renderDailyInsights(window.selectedInsightKey||'globo');barChart('audBars',DATA.summaryBars,'aud',audChannels);barChart('shareBars',DATA.summaryBars,'share',shareChannels);lineChart('dayLine',DATA.line,lineChannels);legend('legend3',lineChannels);document.getElementById('leadership').innerHTML=DATA.leadership.map(l=>{{const c=channelMap[l.key];return `<div class="leader" style="border-top:5px solid ${{l.color}}"><div class="leader-head">${{logoHtml(c)}}<span>${{l.label}}</span></div><strong>${{l.minutes}}</strong><span>${{fmt(l.percent,1)}}% | ${{l.hours}}</span></div>`}}).join('');renderRankings()}}
 function fillSelect(sel, values){{sel.innerHTML=values.map(v=>`<option value="${{esc(v)}}">${{esc(v)}}</option>`).join('')}}
+function profileChoices(){{return ['07h-24h',...(DATA.programs||[]).map(p=>p.name)]}}
 function programMinuteRows(program){{const start=program.start??0,end=program.end??0;return DATA.minuteAll.filter(m=>m.minute>=start && m.minute<end)}}
 function renderProgramas(){{const p=DATA.programs.find(x=>x.name===programSelect.value)||DATA.programs[0];const target=targetSelect.value;programTitle.textContent=`${{p.name}} | ${{target}}`;const comp=(DATA.programCompetition[p.name]||{{}})[target]||{{}};const audBars=audChannels.map(c=>({{...c,aud:comp[c.key]?.aud,share:comp[c.key]?.share}}));const shareBars=shareChannels.map(c=>({{...c,aud:comp[c.key]?.aud,share:comp[c.key]?.share}}));barChart('progAud',audBars,'aud',audBars);barChart('progShare',shareBars,'share',shareBars);const rows=programMinuteRows(p);lineChart('progLine',rows,lineChannels,r=>r.aud);legend('legend4',lineChannels);minuteTable.innerHTML=`<table class="minute-table"><thead><tr><th>Minuto</th>${{programTableChannels.map(c=>`<th colspan="2" style="border-top:4px solid ${{c.color}}">${{logoHtml(c)}} ${{c.label}}</th>`).join('')}}</tr><tr><th></th>${{programTableChannels.map(c=>`<th class="num">Aud.</th><th class="num">Share</th>`).join('')}}</tr></thead><tbody>${{rows.map(r=>`<tr><td><strong>${{r.time}}</strong></td>${{programTableChannels.map(c=>`<td class="num" style="color:${{c.color}}">${{fmt(r.aud[c.key])}}</td><td class="num">${{fmt(r.share[c.key])}}</td>`).join('')}}</tr>`).join('')}}</tbody></table>`}}
 function softenColor(hex){{const h=String(hex||'#005cef').replace('#','');const raw=h.length===3?h.split('').map(x=>x+x).join(''):h;const n=parseInt(raw,16);if(!Number.isFinite(n))return '#45a3ff';const r=(n>>16)&255,g=(n>>8)&255,b=n&255;const mix=v=>Math.round(v+(255-v)*.34);return `rgb(${{mix(r)}},${{mix(g)}},${{mix(b)}})`}}
@@ -650,6 +699,7 @@ function channelForRaw(raw){{const n=normalizeText(raw);if(n.includes('reference
 function colToIdxJs(ref){{let n=0;for(const ch of String(ref).replace(/[^A-Za-z]/g,''))n=n*26+(ch.toUpperCase().charCodeAt(0)-64);return n-1}}
 async function readXlsxFile(file,nameOverride){{const zip=await JSZip.loadAsync(file);const parser=new DOMParser();const xml=async p=>parser.parseFromString(await zip.file(p).async('text'),'application/xml');let shared=[];if(zip.file('xl/sharedStrings.xml')){{const sst=await xml('xl/sharedStrings.xml');shared=[...sst.getElementsByTagName('si')].map(si=>[...si.getElementsByTagName('t')].map(t=>t.textContent||'').join(''))}}const wb=await xml('xl/workbook.xml');const rels=await xml('xl/_rels/workbook.xml.rels');const relMap={{}};[...rels.getElementsByTagName('Relationship')].forEach(r=>relMap[r.getAttribute('Id')]=r.getAttribute('Target'));const sheets={{}};for(const sh of [...wb.getElementsByTagName('sheet')]){{const name=sh.getAttribute('name');const rid=sh.getAttribute('r:id')||sh.getAttribute('id');let target=relMap[rid];let path=target.startsWith('/')?target.slice(1):(target.startsWith('xl/')?target:'xl/'+target);const doc=await xml(path);const rows=[];for(const row of [...doc.getElementsByTagName('row')]){{const vals=[];for(const c of [...row.getElementsByTagName('c')]){{const idx=colToIdxJs(c.getAttribute('r')||'A1');while(vals.length<=idx)vals.push('');const typ=c.getAttribute('t');let txt='';if(typ==='inlineStr')txt=[...c.getElementsByTagName('t')].map(t=>t.textContent||'').join('');else{{const v=c.getElementsByTagName('v')[0];txt=v?v.textContent||'':'';if(typ==='s'&&txt)txt=shared[Number(txt)]||''}}vals[idx]=txt}}rows.push(vals)}}sheets[name]=rows}}return {{name:nameOverride||file.name,sheets}}}}
 function readMatrixJs(rows,headerRows,allowed){{const out={{}};for(const row of rows.slice(headerRows.start)){{if(!row||!row[0]||row[0]==='Total')continue;const name=row[0];out[name]={{}};const maxCols=Math.max(...rows.slice(0,headerRows.entity+1).map(r=>r.length));for(let i=1;i<maxCols;i++){{const target=(rows[headerRows.target]||[])[i]||'';const rawVar=(rows[headerRows.var]||[])[i]||'';const entity=(rows[headerRows.entity]||[])[i]||'';const key=channelForRaw(entity);let metric=allowed===null?'adh':metricFromVarJs(rawVar);if(target&&key&&(allowed===null||allowed.includes(metric))){{out[name][target]??={{}};out[name][target][key]??={{}};out[name][target][key][metric]=fnumJs(row[i])}}}}}}return out}}
+function readTotalProfileJs(rows){{const out={{}};const total=(rows||[]).find(r=>r&&r[0]==='Total');if(!total)return out;const headerRows={{target:3,entity:4}};const maxCols=Math.max(...rows.slice(0,headerRows.entity+1).map(r=>r.length));for(let i=1;i<maxCols;i++){{const target=(rows[headerRows.target]||[])[i]||'';const entity=(rows[headerRows.entity]||[])[i]||'';const key=channelForRaw(entity);if(target&&key){{out[target]??={{}};out[target][key]={{adh:fnumJs(total[i])}}}}}}return out}}
 function loadMinuteDataJs(rows){{const minutes=[];const targets=rows[1]||[], vars=rows[2]||[], entities=rows[3]||[];const maxCols=Math.max(targets.length,vars.length,entities.length);for(const row of rows.slice(5)){{const minute=parseTimebandJs(row[0]);if(minute===null)continue;const item={{time:hhmmFromMinJs(minute),minute,aud:{{}},share:{{}}}};for(let i=1;i<maxCols;i++){{if(!normalizeText(targets[i]).includes('total domic'))continue;const metric=metricFromVarJs(vars[i]);if(metric!=='aud'&&metric!=='share')continue;const key=channelForRaw(entities[i]);if(key)item[metric][key]=fnumJs(row[i])}}minutes.push(item)}}return minutes}}
 function loadProgramsJs(programRows,crosstabRows){{const programs=[];const targets=programRows[1]||[], vars=programRows[2]||[];for(const row of programRows.slice(4)){{if(!row||!row[0])continue;const p={{name:row[0],start:fracToMinutesJs(row[1]),end:fracToMinutesJs(row[2]),targets:{{}}}};for(let i=3;i<targets.length;i++){{const target=targets[i], metric=metricFromVarJs(vars[i]);if(metric==='aud'||metric==='share'){{p.targets[target]??={{}};p.targets[target][metric]=fnumJs(row[i])}}}}programs.push(p)}}return [programs,readMatrixJs(crosstabRows,{{target:2,var:3,entity:4,start:6}},['aud','share'])]}}
 function loadRankingsJs(currentBook,previousBook){{const map={{globo:'Globo',record:'Record',sbt:'SBT',band:'BAND'}}, rankings={{}};for(const [key,sheet] of Object.entries(map)){{const cur=currentBook.sheets[sheet]||[], prev=previousBook.sheets[sheet]||[], prevBy={{}};for(const row of prev.slice(3))if(row[1])prevBy[row[1]]={{aud:fnumJs(row[2]),share:fnumJs(row[3])}};rankings[key]=cur.slice(3,13).filter(r=>r[1]).map((row,idx)=>{{const aud=fnumJs(row[2]),share=fnumJs(row[3]),p=prevBy[row[1]]||{{}};const variation=(now,before)=>now===null||before===null||before===undefined||before===0?null:(now-before)/before*100;const audVar=variation(aud,p.aud), shareVar=variation(share,p.share);return {{rank:idx+1,program:row[1],aud,audPrev:p.aud,audVar,audStatus:audVar>0?'cresceu':audVar<0?'caiu':'estavel',share,sharePrev:p.share,shareVar,shareStatus:shareVar>0?'cresceu':shareVar<0?'caiu':'estavel'}}}})}}return rankings}}
@@ -666,6 +716,7 @@ function buildDataFromBooks(books){{
   const dayMinutes=minutesAll.filter(m=>m.minute>=7*60&&m.minute<24*60);const lineMinutes=minutesAll.filter(m=>m.minute>=6*60||m.minute<6*60).sort((a,b)=>((a.minute-6*60+24*60)%(24*60))-((b.minute-6*60+24*60)%(24*60)));
   const [programs,competition]=loadProgramsJs(programBook.sheets.Programas||[],programBook.sheets.Crosstab||[]);
   const profile=readMatrixJs(profileBook.sheets.Crosstab1||[],{{target:3,var:2,entity:4,start:6}},null);
+  const profileTotal=readTotalProfileJs(profileBook.sheets.Crosstab1||[]);
   const turnos=turnosBook.sheets.Crosstab||[];
   const row724=turnos.find(r=>r[0]&&String(r[0]).includes('07:00-24:00'))||[];
   let dateSerial='';
@@ -686,7 +737,13 @@ function buildDataFromBooks(books){{
     return {{key:ch.key,label:ch.label,color:ch.color,minutes:mins,percent:pctJs(dayMinutes.length?mins/dayMinutes.length*100:0),hours:`${{Math.floor(mins/60)}}h${{String(mins%60).padStart(2,'0')}}`}};
   }});
   const adh=(name,target,key)=>{{const bucket=profile[name]?.[target]?.[key]||{{}};return bucket.adh??Object.values(bucket)[0]}};
+  const totalAdh=(target,key)=>{{const bucket=profileTotal[target]?.[key]||{{}};return bucket.adh??Object.values(bucket)[0]}};
   const profileData={{}};
+  profileData['07h-24h']={{}};
+  for(const ch of DATA.leadershipChannels){{
+    const metrics=summaryBars.find(r=>r.key===ch.key)||{{}};
+    profileData['07h-24h'][ch.key]={{aud:metrics.aud,share:metrics.share,gender:{{Homem:totalAdh('Masculino',ch.key),Mulher:totalAdh('Feminino',ch.key)}},classes:{{AB1:totalAdh('AB1',ch.key),B2:totalAdh('B2',ch.key),C1:totalAdh('C1',ch.key),C2:totalAdh('C2',ch.key),DE:totalAdh('DE',ch.key)}},ages:{{'4-11':totalAdh('4-11 anos',ch.key),'12-17':totalAdh('12-17 anos',ch.key),'18-24':totalAdh('18-24 anos',ch.key),'25-34':totalAdh('25-34 anos',ch.key),'35-49':totalAdh('35-49 anos',ch.key),'50+':totalAdh('50+',ch.key)}}}};
+  }}
   for(const p of programs){{
     profileData[p.name]={{}};
     for(const ch of DATA.leadershipChannels){{
@@ -698,13 +755,14 @@ function buildDataFromBooks(books){{
   const weekdays=['domingo','segunda-feira','ter\u00e7a-feira','quarta-feira','quinta-feira','sexta-feira','s\u00e1bado'];
   return {{meta:{{date:dateIso,weekday:weekdays[d.getDay()],dailyAvg:fnumJs(row724[2])}},channels:DATA.channels,assets:DATA.assets,leadershipChannels:DATA.leadershipChannels,rankingChannels:DATA.rankingChannels,targets:DATA.targets,summaryBars,line,leadership,programs,programCompetition:competition,minuteAll:minutesAll,profile:profileData,rankings:loadRankingsJs(currentRank,previousRank)}};
 }}
-async function handleUploadedBases(fileList){{fileStatus.style.display='block';fileStatus.textContent='Lendo bases...';const books=[];for(const file of [...fileList]){{const lower=file.name.toLowerCase();if(lower.endsWith('.xlsx'))books.push(await readXlsxFile(file));else if(lower.endsWith('.zip')){{const pack=await JSZip.loadAsync(file);for(const entry of Object.values(pack.files)){{if(!entry.dir&&entry.name.toLowerCase().endsWith('.xlsx')){{const bytes=await entry.async('uint8array');books.push(await readXlsxFile(bytes,entry.name.split(/[\\/]/).pop()))}}}}}}}}DATA=buildDataFromBooks(books);fillSelect(programSelect,DATA.programs.map(p=>p.name));fillSelect(profileSelect,DATA.programs.map(p=>p.name));fillSelect(targetSelect,DATA.targets);fileStatus.textContent='Bases carregadas';revealDashboard()}}
+async function handleUploadedBases(fileList){{fileStatus.style.display='block';fileStatus.textContent='Lendo bases...';const books=[];for(const file of [...fileList]){{const lower=file.name.toLowerCase();if(lower.endsWith('.xlsx'))books.push(await readXlsxFile(file));else if(lower.endsWith('.zip')){{const pack=await JSZip.loadAsync(file);for(const entry of Object.values(pack.files)){{if(!entry.dir&&entry.name.toLowerCase().endsWith('.xlsx')){{const bytes=await entry.async('uint8array');books.push(await readXlsxFile(bytes,entry.name.split(/[\\/]/).pop()))}}}}}}}}DATA=buildDataFromBooks(books);fillSelect(programSelect,DATA.programs.map(p=>p.name));fillSelect(profileSelect,profileChoices());profileSelect.value='07h-24h';fillSelect(targetSelect,DATA.targets);fileStatus.textContent='Bases carregadas';revealDashboard()}}
 document.querySelectorAll('.tab').forEach(btn=>btn.addEventListener('click',()=>{{document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));btn.classList.add('active');document.getElementById(btn.dataset.tab).classList.add('active');setTimeout(()=>{{renderResumo();renderProgramas();renderPerfil()}},0)}}));
 const programSelect=document.getElementById('programSelect'),targetSelect=document.getElementById('targetSelect'),profileSelect=document.getElementById('profileSelect'),programTitle=document.getElementById('programTitle'),profileTitle=document.getElementById('profileTitle'),minuteTable=document.getElementById('minuteTable'),profileGrid=document.getElementById('profileGrid'),baseUpload=document.getElementById('baseUpload'),fileStatus=document.getElementById('fileStatus');
-fillSelect(programSelect,DATA.programs.map(p=>p.name));fillSelect(profileSelect,DATA.programs.map(p=>p.name));fillSelect(targetSelect,DATA.targets);
+fillSelect(programSelect,DATA.programs.map(p=>p.name));fillSelect(profileSelect,profileChoices());profileSelect.value='07h-24h';fillSelect(targetSelect,DATA.targets);
 programSelect.addEventListener('change',renderProgramas);targetSelect.addEventListener('change',renderProgramas);profileSelect.addEventListener('change',renderPerfil);window.addEventListener('resize',()=>{{renderResumo();renderProgramas();renderPerfil()}});
 function revealDashboard(){{document.body.className=document.body.className.replace(/\\bawaiting-bases\\b/g,'').trim();document.querySelector('header .actions').style.display='none';setTimeout(()=>{{renderResumo();renderProgramas();renderPerfil();window.scrollTo({{top:0,behavior:'smooth'}})}},0)}}
-document.getElementById('uploadBtn').addEventListener('click',()=>baseUpload.click());baseUpload.addEventListener('change',async()=>{{try{{const files=[...baseUpload.files].map(f=>f.name);fileStatus.textContent=files.length?`${{files.length}} arquivo(s): ${{files.join(', ')}}`:'';if(files.length)await handleUploadedBases(baseUpload.files)}}catch(err){{fileStatus.style.display='block';fileStatus.textContent='Erro ao ler bases: '+err.message;console.error(err)}}}});document.getElementById('exportBtn').addEventListener('click',exportHtml);document.getElementById('imageBtn').addEventListener('click',generateHighlightsImage);
+const uploadButton=document.getElementById('uploadBtn'),exportButton=document.getElementById('exportBtn'),imageButton=document.getElementById('imageBtn');
+if(uploadButton)uploadButton.addEventListener('click',()=>baseUpload.click());baseUpload.addEventListener('change',async()=>{{try{{const files=[...baseUpload.files].map(f=>f.name);fileStatus.textContent=files.length?`${{files.length}} arquivo(s): ${{files.join(', ')}}`:'';if(files.length)await handleUploadedBases(baseUpload.files)}}catch(err){{fileStatus.style.display='block';fileStatus.textContent='Erro ao ler bases: '+err.message;console.error(err)}}}});if(exportButton)exportButton.addEventListener('click',exportHtml);if(imageButton)imageButton.addEventListener('click',generateHighlightsImage);
 renderResumo();renderProgramas();renderPerfil();
 </script>
 </body>
