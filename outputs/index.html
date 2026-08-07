@@ -292,6 +292,10 @@ async function exportHtml(){
   const clone=document.documentElement.cloneNode(true);
   clone.querySelectorAll('#baseUpload').forEach(el=>el.value='');
   clone.querySelectorAll('.final-actions,.highlights-editor,header .actions').forEach(el=>el.remove());
+  clone.querySelectorAll('svg').forEach(el=>el.replaceChildren());
+  clone.querySelectorAll('#dailyInsights,#legend1,#legend2,#legend3,#legend4,#leadership,#rankings,#minuteTable,#profileGrid,#mobileSummary,#tabletSummary').forEach(el=>el.innerHTML='');
+  clone.querySelectorAll('#dateLabel,#dailyAvg,#programTitle,#profileTitle,#sourceNote').forEach(el=>el.textContent='');
+  clone.querySelectorAll('#globoKpiLogo').forEach(el=>el.removeAttribute('src'));
   clone.querySelectorAll('script').forEach(el=>{const txt=(el.textContent||'').trimStart();const head=txt.slice(0,260);if(txt.startsWith('/*!')&&head.includes('JS'+'Zip'))el.remove()});
   clone.querySelectorAll('.tabs .tab').forEach(btn=>btn.classList.toggle('active',btn.dataset.tab==='resumo'));
   clone.querySelectorAll('.panel').forEach(panel=>panel.classList.toggle('active',panel.id==='resumo'));
