@@ -147,11 +147,41 @@ def value_by_alias(values: dict[str, float], ch: dict):
     return None
 
 
-def excel_date(serial: str) -> str:
-    n = fnum(serial)
-    if n is None:
+def parse_report_date(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
         return ""
-    return (datetime(1899, 12, 30) + timedelta(days=int(n))).strftime("%Y-%m-%d")
+
+    if re.fullmatch(r"\d{5}(?:\.0+)?", raw):
+        parsed = datetime(1899, 12, 30) + timedelta(days=int(float(raw)))
+        return parsed.strftime("%Y-%m-%d") if 2000 <= parsed.year <= 2100 else ""
+
+    for pattern, order in (
+        (r"(\d{1,2})/(\d{1,2})/(\d{4})", "dmy"),
+        (r"(\d{4})-(\d{1,2})-(\d{1,2})", "ymd"),
+    ):
+        match = re.fullmatch(pattern, raw)
+        if not match:
+            continue
+        parts = [int(part) for part in match.groups()]
+        year, month, day = parts if order == "ymd" else (parts[2], parts[1], parts[0])
+        try:
+            return datetime(year, month, day).strftime("%Y-%m-%d")
+        except ValueError:
+            return ""
+    return ""
+
+
+def report_date_from_book(book: dict, first_column_only=True) -> str:
+    counts = defaultdict(int)
+    for rows in book.values():
+        for row in rows:
+            values = row[:1] if first_column_only else row
+            for value in values:
+                parsed = parse_report_date(value)
+                if parsed:
+                    counts[parsed] += 1
+    return max(counts, key=lambda item: (counts[item], item)) if counts else ""
 
 
 def frac_to_minutes(value: str) -> int | None:
@@ -339,15 +369,14 @@ def build_data():
     turnos = turnos_book["Crosstab"]
     row_7_24 = next((r for r in turnos if r and "07:00-24:00" in r[0]), [])
     daily_avg = fnum(row_7_24[2] if len(row_7_24) > 2 else "")
-    date_serial = ""
-    for rows in programs_book.values():
-        for row in rows:
-            if row and re.fullmatch(r"\d{5}", row[0] or ""):
-                date_serial = row[0]
-                break
-        if date_serial:
-            break
-    date_iso = excel_date(date_serial) or "2026-07-08"
+    date_iso = (
+        report_date_from_book(programs_book)
+        or report_date_from_book(profile_book)
+        or report_date_from_book(current_rank, first_column_only=False)
+        or report_date_from_book(turnos_book, first_column_only=False)
+    )
+    if not date_iso:
+        raise ValueError("Não foi possível identificar a data dos programas nas bases enviadas.")
 
     summary_bars = []
     for ch in CHANNELS:
@@ -567,7 +596,7 @@ main{{max-width:1440px;margin:0 auto;padding:24px;display:grid;gap:18px}}.panel{
 </style>
 </head>
 <body class="awaiting-bases">
-<header class="app"><div class="top"><div class="brand"><img class="brand-logo" id="plimLogo" src="{plim_icon}" alt="Plim plim"><span>Desempenho Diário</span></div><div class="header-right"><div class="actions"><input id="baseUpload" type="file" accept=".zip,.xlsx" multiple hidden><button class="action-btn primary" id="uploadBtn" type="button">Enviar base</button><span class="file-status" id="fileStatus"></span></div><div class="version-info">Versão v1.4 &bull; Última atualização: 19/08/2026</div><nav class="tabs"><button class="tab active" type="button" data-tab="resumo" onclick="activateTab(this)">RESUMO</button><button class="tab" type="button" data-tab="programas" onclick="activateTab(this)">PROGRAMAS</button><button class="tab" type="button" data-tab="perfil" onclick="activateTab(this)">PERFIL</button></nav></div></div></header>
+<header class="app"><div class="top"><div class="brand"><img class="brand-logo" id="plimLogo" src="{plim_icon}" alt="Plim plim"><span>Desempenho Diário</span></div><div class="header-right"><div class="actions"><input id="baseUpload" type="file" accept=".zip,.xlsx" multiple hidden><button class="action-btn primary" id="uploadBtn" type="button">Enviar base</button><span class="file-status" id="fileStatus"></span></div><div class="version-info">Versão v1.4.1 &bull; Última atualização: 25/09/2026</div><nav class="tabs"><button class="tab active" type="button" data-tab="resumo" onclick="activateTab(this)">RESUMO</button><button class="tab" type="button" data-tab="programas" onclick="activateTab(this)">PROGRAMAS</button><button class="tab" type="button" data-tab="perfil" onclick="activateTab(this)">PERFIL</button></nav></div></div></header>
 <main>
 <section id="mobileSummary" class="mobile-summary"></section>
 <section id="tabletSummary" class="tablet-summary"></section>
@@ -900,7 +929,18 @@ function normalizeText(value){{return String(value??'').normalize('NFD').replace
 function fnumJs(value){{if(value===null||value===undefined||value===''||value==='n/a')return null;const n=Number(String(value).replace(',','.'));return Number.isFinite(n)?n:null}}
 function pctJs(value){{return value===null||value===undefined?null:Math.round(value*100)/100}}
 function avgJs(values){{const clean=values.filter(v=>typeof v==='number'&&Number.isFinite(v));return clean.length?clean.reduce((a,b)=>a+b,0)/clean.length:null}}
-function excelDateJs(serial){{const n=fnumJs(serial);if(n===null)return '';const d=new Date(Date.UTC(1899,11,30)+Math.floor(n)*86400000);return d.toISOString().slice(0,10)}}
+function parseReportDateJs(value){{
+  const raw=String(value??'').trim();if(!raw)return '';
+  if(/^\d{{5}}(?:\.0+)?$/.test(raw)){{const n=Number(raw),d=new Date(Date.UTC(1899,11,30)+Math.floor(n)*86400000);return d.getUTCFullYear()>=2000&&d.getUTCFullYear()<=2100?d.toISOString().slice(0,10):''}}
+  let match=raw.match(/^(\d{{1,2}})\/(\d{{1,2}})\/(\d{{4}})$/);let year,month,day;
+  if(match){{day=Number(match[1]);month=Number(match[2]);year=Number(match[3])}}else{{match=raw.match(/^(\d{{4}})-(\d{{1,2}})-(\d{{1,2}})$/);if(!match)return '';year=Number(match[1]);month=Number(match[2]);day=Number(match[3])}}
+  const d=new Date(Date.UTC(year,month-1,day));return d.getUTCFullYear()===year&&d.getUTCMonth()===month-1&&d.getUTCDate()===day?d.toISOString().slice(0,10):'';
+}}
+function reportDateFromBookJs(book,firstColumnOnly=true){{
+  const counts={{}};
+  for(const rows of Object.values(book?.sheets||{{}}))for(const row of rows||[]){{const values=firstColumnOnly?(row||[]).slice(0,1):(row||[]);for(const value of values){{const parsed=parseReportDateJs(value);if(parsed)counts[parsed]=(counts[parsed]||0)+1}}}}
+  return Object.entries(counts).sort((a,b)=>b[1]-a[1]||b[0].localeCompare(a[0]))[0]?.[0]||'';
+}}
 function fracToMinutesJs(value){{const n=fnumJs(value);return n===null?null:Math.round(n*24*60)}}
 function hhmmFromMinJs(minutes){{minutes=((minutes%(24*60))+(24*60))%(24*60);return `${{String(Math.floor(minutes/60)).padStart(2,'0')}}:${{String(minutes%60).padStart(2,'0')}}`}}
 function parseTimebandJs(label){{const m=String(label||'').match(/(\\d{{2}}):(\\d{{2}}):\\d{{2}}/);return m?Number(m[1])*60+Number(m[2]):null}}
@@ -929,14 +969,8 @@ function buildDataFromBooks(books){{
   const profileTotal=readTotalProfileJs(profileBook.sheets.Crosstab1||[]);
   const turnos=turnosBook.sheets.Crosstab||[];
   const row724=turnos.find(r=>r[0]&&String(r[0]).includes('07:00-24:00'))||[];
-  let dateSerial='';
-  for(const rows of Object.values(programBook.sheets)){{
-    for(const row of rows){{
-      if(row&&/^\\d{{5}}$/.test(row[0]||'')){{dateSerial=row[0];break;}}
-    }}
-    if(dateSerial)break;
-  }}
-  const dateIso=excelDateJs(dateSerial)||new Date().toISOString().slice(0,10);
+  const dateIso=reportDateFromBookJs(programBook)||reportDateFromBookJs(profileBook)||reportDateFromBookJs(currentRank,false)||reportDateFromBookJs(turnosBook,false);
+  if(!dateIso)throw new Error('Não foi possível identificar a data dos programas nas bases enviadas.');
   const summaryBars=DATA.channels.map(ch=>({{key:ch.key,label:ch.label,color:ch.color,aud:pctJs(avgJs(dayMinutes.map(m=>m.aud[ch.key]))),share:pctJs(avgJs(dayMinutes.map(m=>m.share[ch.key])))}}));
   const line=lineMinutes.map(m=>({{time:m.time,aud:Object.fromEntries(DATA.channels.map(ch=>[ch.key,pctJs(m.aud[ch.key])]))}}));
   const leadership=DATA.leadershipChannels.map(ch=>{{
