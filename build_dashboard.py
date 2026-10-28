@@ -185,6 +185,13 @@ def report_date_from_book(book: dict, first_column_only=True) -> str:
 
 
 def frac_to_minutes(value: str) -> int | None:
+    raw = str(value or "").strip()
+    time_match = re.fullmatch(r"(\d{1,2}):(\d{2})(?::(\d{2}))?", raw)
+    if time_match:
+        hours, minutes, seconds = (int(part or 0) for part in time_match.groups())
+        if minutes >= 60 or seconds >= 60:
+            return None
+        return hours * 60 + minutes + (1 if seconds >= 30 else 0)
     n = fnum(value)
     if n is None:
         return None
@@ -301,7 +308,7 @@ def load_profile_total(rows):
     return data
 
 
-def load_rankings(current_book, previous_book):
+def load_rankings(current_book, previous_book, limit=10):
     sheet_map = {"globo": "Globo", "record": "Record", "sbt": "SBT", "band": "BAND"}
     rankings = {}
     for key, sheet in sheet_map.items():
@@ -312,7 +319,8 @@ def load_rankings(current_book, previous_book):
             if len(row) >= 4 and row[1]:
                 prev_by_name[row[1]] = {"aud": fnum(row[2]), "share": fnum(row[3])}
         entries = []
-        for idx, row in enumerate(cur_rows[3:13], 1):
+        current_rows = cur_rows[3:] if limit is None else cur_rows[3 : 3 + limit]
+        for idx, row in enumerate(current_rows, 1):
             if len(row) < 4 or not row[1]:
                 continue
             aud = fnum(row[2])
@@ -504,6 +512,7 @@ def build_data():
         "minuteAll": minutes_all,
         "profile": profile_data,
         "rankings": load_rankings(current_rank, previous_rank),
+        "performanceRankings": load_rankings(current_rank, previous_rank, limit=None),
     }
 
 
@@ -596,7 +605,7 @@ main{{max-width:1440px;margin:0 auto;padding:24px;display:grid;gap:18px}}.panel{
 </style>
 </head>
 <body class="awaiting-bases">
-<header class="app"><div class="top"><div class="brand"><img class="brand-logo" id="plimLogo" src="{plim_icon}" alt="Plim plim"><span>Desempenho Diário</span></div><div class="header-right"><div class="actions"><input id="baseUpload" type="file" accept=".zip,.xlsx" multiple hidden><button class="action-btn primary" id="uploadBtn" type="button">Enviar base</button><span class="file-status" id="fileStatus"></span></div><div class="version-info">Versão v1.4.1 &bull; Última atualização: 25/09/2026</div><nav class="tabs"><button class="tab active" type="button" data-tab="resumo" onclick="activateTab(this)">RESUMO</button><button class="tab" type="button" data-tab="programas" onclick="activateTab(this)">PROGRAMAS</button><button class="tab" type="button" data-tab="perfil" onclick="activateTab(this)">PERFIL</button></nav></div></div></header>
+<header class="app"><div class="top"><div class="brand"><img class="brand-logo" id="plimLogo" src="{plim_icon}" alt="Plim plim"><span>Desempenho Diário</span></div><div class="header-right"><div class="actions"><input id="baseUpload" type="file" accept=".zip,.xlsx" multiple hidden><button class="action-btn primary" id="uploadBtn" type="button">Enviar base</button><span class="file-status" id="fileStatus"></span></div><div class="version-info">Versão v1.4.3 &bull; Última atualização: 28/10/2026</div><nav class="tabs"><button class="tab active" type="button" data-tab="resumo" onclick="activateTab(this)">RESUMO</button><button class="tab" type="button" data-tab="programas" onclick="activateTab(this)">PROGRAMAS</button><button class="tab" type="button" data-tab="perfil" onclick="activateTab(this)">PERFIL</button></nav></div></div></header>
 <main>
 <section id="mobileSummary" class="mobile-summary"></section>
 <section id="tabletSummary" class="tablet-summary"></section>
@@ -886,8 +895,8 @@ async function generateHighlightsImage(){{
   const W=1080,H=1920,S=2;
   const metricKeys=['globo','nic','record','sbt'];
   const metricItems=metricKeys.map(key=>{{const c=channelMap[key]||{{key,label:key.toUpperCase(),color:'#005cef'}};const row=DATA.summaryBars.find(x=>x.key===key)||{{}};return {{...c,aud:row.aud,share:row.share}}}});
-  const globoShares=(DATA.rankings.globo||[]).filter(r=>r.share!==null&&r.share!==undefined);
-  const performanceRanking=[...globoShares].sort((a,b)=>(b.share||0)-(a.share||0));
+  const globoShares=(DATA.performanceRankings?.globo||DATA.rankings.globo||[]).filter(r=>r.share!==null&&r.share!==undefined);
+  const performanceRanking=[...globoShares].sort((a,b)=>(b.share||0)-(a.share||0)).slice(0,10);
   const canvas=document.createElement('canvas');canvas.width=W*S;canvas.height=H*S;canvas.style.width=W+'px';canvas.style.height=H+'px';
   const ctx=canvas.getContext('2d');ctx.scale(S,S);ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
   const grad=ctx.createLinearGradient(0,0,W,H);grad.addColorStop(0,'#003bb2');grad.addColorStop(.55,'#005cef');grad.addColorStop(1,'#65c7ff');ctx.fillStyle=grad;ctx.fillRect(0,0,W,H);
@@ -941,7 +950,7 @@ function reportDateFromBookJs(book,firstColumnOnly=true){{
   for(const rows of Object.values(book?.sheets||{{}}))for(const row of rows||[]){{const values=firstColumnOnly?(row||[]).slice(0,1):(row||[]);for(const value of values){{const parsed=parseReportDateJs(value);if(parsed)counts[parsed]=(counts[parsed]||0)+1}}}}
   return Object.entries(counts).sort((a,b)=>b[1]-a[1]||b[0].localeCompare(a[0]))[0]?.[0]||'';
 }}
-function fracToMinutesJs(value){{const n=fnumJs(value);return n===null?null:Math.round(n*24*60)}}
+function fracToMinutesJs(value){{const raw=String(value??'').trim(),match=raw.match(/^(\d{{1,2}}):(\d{{2}})(?::(\d{{2}}))?$/);if(match){{const hours=Number(match[1]),minutes=Number(match[2]),seconds=Number(match[3]||0);if(minutes>=60||seconds>=60)return null;return hours*60+minutes+(seconds>=30?1:0)}}const n=fnumJs(value);return n===null?null:Math.round(n*24*60)}}
 function hhmmFromMinJs(minutes){{minutes=((minutes%(24*60))+(24*60))%(24*60);return `${{String(Math.floor(minutes/60)).padStart(2,'0')}}:${{String(minutes%60).padStart(2,'0')}}`}}
 function parseTimebandJs(label){{const m=String(label||'').match(/(\\d{{2}}):(\\d{{2}}):\\d{{2}}/);return m?Number(m[1])*60+Number(m[2]):null}}
 function metricFromVarJs(v){{return String(v||'').includes('Shr%')?'share':String(v||'').includes('Rat%')?'aud':v}}
@@ -952,7 +961,7 @@ function readMatrixJs(rows,headerRows,allowed){{const out={{}};for(const row of 
 function readTotalProfileJs(rows){{const out={{}};const total=(rows||[]).find(r=>r&&r[0]==='Total');if(!total)return out;const headerRows={{target:3,entity:4}};const maxCols=Math.max(...rows.slice(0,headerRows.entity+1).map(r=>r.length));for(let i=1;i<maxCols;i++){{const target=(rows[headerRows.target]||[])[i]||'';const entity=(rows[headerRows.entity]||[])[i]||'';const key=channelForRaw(entity);if(target&&key){{out[target]??={{}};out[target][key]={{adh:fnumJs(total[i])}}}}}}return out}}
 function loadMinuteDataJs(rows){{const minutes=[];const targets=rows[1]||[], vars=rows[2]||[], entities=rows[3]||[];const maxCols=Math.max(targets.length,vars.length,entities.length);for(const row of rows.slice(5)){{const minute=parseTimebandJs(row[0]);if(minute===null)continue;const item={{time:hhmmFromMinJs(minute),minute,aud:{{}},share:{{}}}};for(let i=1;i<maxCols;i++){{if(!normalizeText(targets[i]).includes('total domic'))continue;const metric=metricFromVarJs(vars[i]);if(metric!=='aud'&&metric!=='share')continue;const key=channelForRaw(entities[i]);if(key)item[metric][key]=fnumJs(row[i])}}minutes.push(item)}}return minutes}}
 function loadProgramsJs(programRows,crosstabRows){{const programs=[];const targets=programRows[1]||[], vars=programRows[2]||[];for(const row of programRows.slice(4)){{if(!row||!row[0])continue;const p={{name:row[0],start:fracToMinutesJs(row[1]),end:fracToMinutesJs(row[2]),targets:{{}}}};for(let i=3;i<targets.length;i++){{const target=targets[i], metric=metricFromVarJs(vars[i]);if(metric==='aud'||metric==='share'){{p.targets[target]??={{}};p.targets[target][metric]=fnumJs(row[i])}}}}programs.push(p)}}return [programs,readMatrixJs(crosstabRows,{{target:2,var:3,entity:4,start:6}},['aud','share'])]}}
-function loadRankingsJs(currentBook,previousBook){{const map={{globo:'Globo',record:'Record',sbt:'SBT',band:'BAND'}}, rankings={{}};for(const [key,sheet] of Object.entries(map)){{const cur=currentBook.sheets[sheet]||[], prev=previousBook.sheets[sheet]||[], prevBy={{}};for(const row of prev.slice(3))if(row[1])prevBy[row[1]]={{aud:fnumJs(row[2]),share:fnumJs(row[3])}};rankings[key]=cur.slice(3,13).filter(r=>r[1]).map((row,idx)=>{{const aud=fnumJs(row[2]),share=fnumJs(row[3]),p=prevBy[row[1]]||{{}};const variation=(now,before)=>now===null||before===null||before===undefined||before===0?null:(now-before)/before*100;const audVar=variation(aud,p.aud), shareVar=variation(share,p.share);return {{rank:idx+1,program:row[1],aud,audPrev:p.aud,audVar,audStatus:statusFromVar(audVar),share,sharePrev:p.share,shareVar,shareStatus:statusFromVar(shareVar)}}}})}}return rankings}}
+function loadRankingsJs(currentBook,previousBook,limit=10){{const map={{globo:'Globo',record:'Record',sbt:'SBT',band:'BAND'}}, rankings={{}};for(const [key,sheet] of Object.entries(map)){{const cur=currentBook.sheets[sheet]||[], prev=previousBook.sheets[sheet]||[], prevBy={{}};for(const row of prev.slice(3))if(row[1])prevBy[row[1]]={{aud:fnumJs(row[2]),share:fnumJs(row[3])}};const currentRows=limit==null?cur.slice(3):cur.slice(3,3+limit);rankings[key]=currentRows.filter(r=>r[1]).map((row,idx)=>{{const aud=fnumJs(row[2]),share=fnumJs(row[3]),p=prevBy[row[1]]||{{}};const variation=(now,before)=>now===null||before===null||before===undefined||before===0?null:(now-before)/before*100;const audVar=variation(aud,p.aud), shareVar=variation(share,p.share);return {{rank:idx+1,program:row[1],aud,audPrev:p.aud,audVar,audStatus:statusFromVar(audVar),share,sharePrev:p.share,shareVar,shareStatus:statusFromVar(shareVar)}}}})}}return rankings}}
 function buildDataFromBooks(books){{
   const byName=name=>books.find(b=>normalizeText(b.name).includes(normalizeText(name)));
   const minuteBook=byName('Base_aud_minuto');
@@ -997,7 +1006,7 @@ function buildDataFromBooks(books){{
   }}
   const d=new Date(dateIso+'T00:00:00');
   const weekdays=['domingo','segunda-feira','ter\u00e7a-feira','quarta-feira','quinta-feira','sexta-feira','s\u00e1bado'];
-  return {{meta:{{date:dateIso,weekday:weekdays[d.getDay()],dailyAvg:fnumJs(row724[2])}},channels:DATA.channels,assets:DATA.assets,leadershipChannels:DATA.leadershipChannels,rankingChannels:DATA.rankingChannels,targets:DATA.targets,summaryBars,line,leadership,programs,programCompetition:competition,minuteAll:minutesAll,profile:profileData,rankings:loadRankingsJs(currentRank,previousRank)}};
+  return {{meta:{{date:dateIso,weekday:weekdays[d.getDay()],dailyAvg:fnumJs(row724[2])}},channels:DATA.channels,assets:DATA.assets,leadershipChannels:DATA.leadershipChannels,rankingChannels:DATA.rankingChannels,targets:DATA.targets,summaryBars,line,leadership,programs,programCompetition:competition,minuteAll:minutesAll,profile:profileData,rankings:loadRankingsJs(currentRank,previousRank),performanceRankings:loadRankingsJs(currentRank,previousRank,null)}};
 }}
 async function handleUploadedBases(fileList){{fileStatus.style.display='block';fileStatus.textContent='Lendo bases...';const books=[];for(const file of [...fileList]){{const lower=file.name.toLowerCase();if(lower.endsWith('.xlsx'))books.push(await readXlsxFile(file));else if(lower.endsWith('.zip')){{const pack=await JSZip.loadAsync(file);for(const entry of Object.values(pack.files)){{if(!entry.dir&&entry.name.toLowerCase().endsWith('.xlsx')){{const bytes=await entry.async('uint8array');books.push(await readXlsxFile(bytes,entry.name.split(/[\\/]/).pop()))}}}}}}}}DATA=buildDataFromBooks(books);fillSelect(programSelect,DATA.programs.map(p=>p.name));fillSelect(profileSelect,profileChoices());profileSelect.value='07h-24h';fillSelect(targetSelect,DATA.targets);fileStatus.textContent='Bases carregadas';revealDashboard()}}
 function activateTab(btn){{if(!btn||!btn.dataset||!btn.dataset.tab)return;document.querySelectorAll('.tabs .tab').forEach(b=>b.classList.remove('active'));document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));btn.classList.add('active');document.getElementById(btn.dataset.tab).classList.add('active');setTimeout(()=>{{renderResumo();renderProgramas();renderPerfil()}},0)}}
