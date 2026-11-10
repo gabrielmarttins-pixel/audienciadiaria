@@ -308,9 +308,18 @@ def load_profile_total(rows):
     return data
 
 
-def load_rankings(current_book, previous_book, limit=10):
+def load_rankings(current_book, previous_book, limit=10, report_date=None):
     sheet_map = {"globo": "Globo", "record": "Record", "sbt": "SBT", "band": "BAND"}
     rankings = {}
+    report_day = datetime.fromisoformat(report_date).weekday() if report_date else None
+    is_weekend = report_day in (5, 6)
+
+    def is_available_program(row):
+        if len(row) < 2 or not row[1]:
+            return False
+        program = re.sub(r"\s+", " ", str(row[1]).strip().upper())
+        return not (is_weekend and program.startswith("HORA UM"))
+
     for key, sheet in sheet_map.items():
         cur_rows = current_book.get(sheet, [])
         prev_rows = previous_book.get(sheet, [])
@@ -319,7 +328,8 @@ def load_rankings(current_book, previous_book, limit=10):
             if len(row) >= 4 and row[1]:
                 prev_by_name[row[1]] = {"aud": fnum(row[2]), "share": fnum(row[3])}
         entries = []
-        current_rows = cur_rows[3:] if limit is None else cur_rows[3 : 3 + limit]
+        available_rows = [row for row in cur_rows[3:] if is_available_program(row)]
+        current_rows = available_rows if limit is None else available_rows[:limit]
         for idx, row in enumerate(current_rows, 1):
             if len(row) < 4 or not row[1]:
                 continue
@@ -511,8 +521,10 @@ def build_data():
         "programCompetition": competition,
         "minuteAll": minutes_all,
         "profile": profile_data,
-        "rankings": load_rankings(current_rank, previous_rank),
-        "performanceRankings": load_rankings(current_rank, previous_rank, limit=None),
+        "rankings": load_rankings(current_rank, previous_rank, report_date=date_iso),
+        "performanceRankings": load_rankings(
+            current_rank, previous_rank, limit=None, report_date=date_iso
+        ),
     }
 
 
@@ -605,7 +617,7 @@ main{{max-width:1440px;margin:0 auto;padding:24px;display:grid;gap:18px}}.panel{
 </style>
 </head>
 <body class="awaiting-bases">
-<header class="app"><div class="top"><div class="brand"><img class="brand-logo" id="plimLogo" src="{plim_icon}" alt="Plim plim"><span>Desempenho Diário</span></div><div class="header-right"><div class="actions"><input id="baseUpload" type="file" accept=".zip,.xlsx" multiple hidden><button class="action-btn primary" id="uploadBtn" type="button">Enviar base</button><span class="file-status" id="fileStatus"></span></div><div class="version-info">Versão v1.4.3 &bull; Última atualização: 28/10/2026</div><nav class="tabs"><button class="tab active" type="button" data-tab="resumo" onclick="activateTab(this)">RESUMO</button><button class="tab" type="button" data-tab="programas" onclick="activateTab(this)">PROGRAMAS</button><button class="tab" type="button" data-tab="perfil" onclick="activateTab(this)">PERFIL</button></nav></div></div></header>
+<header class="app"><div class="top"><div class="brand"><img class="brand-logo" id="plimLogo" src="{plim_icon}" alt="Plim plim"><span>Desempenho Diário</span></div><div class="header-right"><div class="actions"><input id="baseUpload" type="file" accept=".zip,.xlsx" multiple hidden><button class="action-btn primary" id="uploadBtn" type="button">Enviar base</button><span class="file-status" id="fileStatus"></span></div><div class="version-info">Versão v1.4.4 &bull; Última atualização: 10/11/2026</div><nav class="tabs"><button class="tab active" type="button" data-tab="resumo" onclick="activateTab(this)">RESUMO</button><button class="tab" type="button" data-tab="programas" onclick="activateTab(this)">PROGRAMAS</button><button class="tab" type="button" data-tab="perfil" onclick="activateTab(this)">PERFIL</button></nav></div></div></header>
 <main>
 <section id="mobileSummary" class="mobile-summary"></section>
 <section id="tabletSummary" class="tablet-summary"></section>
@@ -961,7 +973,7 @@ function readMatrixJs(rows,headerRows,allowed){{const out={{}};for(const row of 
 function readTotalProfileJs(rows){{const out={{}};const total=(rows||[]).find(r=>r&&r[0]==='Total');if(!total)return out;const headerRows={{target:3,entity:4}};const maxCols=Math.max(...rows.slice(0,headerRows.entity+1).map(r=>r.length));for(let i=1;i<maxCols;i++){{const target=(rows[headerRows.target]||[])[i]||'';const entity=(rows[headerRows.entity]||[])[i]||'';const key=channelForRaw(entity);if(target&&key){{out[target]??={{}};out[target][key]={{adh:fnumJs(total[i])}}}}}}return out}}
 function loadMinuteDataJs(rows){{const minutes=[];const targets=rows[1]||[], vars=rows[2]||[], entities=rows[3]||[];const maxCols=Math.max(targets.length,vars.length,entities.length);for(const row of rows.slice(5)){{const minute=parseTimebandJs(row[0]);if(minute===null)continue;const item={{time:hhmmFromMinJs(minute),minute,aud:{{}},share:{{}}}};for(let i=1;i<maxCols;i++){{if(!normalizeText(targets[i]).includes('total domic'))continue;const metric=metricFromVarJs(vars[i]);if(metric!=='aud'&&metric!=='share')continue;const key=channelForRaw(entities[i]);if(key)item[metric][key]=fnumJs(row[i])}}minutes.push(item)}}return minutes}}
 function loadProgramsJs(programRows,crosstabRows){{const programs=[];const targets=programRows[1]||[], vars=programRows[2]||[];for(const row of programRows.slice(4)){{if(!row||!row[0])continue;const p={{name:row[0],start:fracToMinutesJs(row[1]),end:fracToMinutesJs(row[2]),targets:{{}}}};for(let i=3;i<targets.length;i++){{const target=targets[i], metric=metricFromVarJs(vars[i]);if(metric==='aud'||metric==='share'){{p.targets[target]??={{}};p.targets[target][metric]=fnumJs(row[i])}}}}programs.push(p)}}return [programs,readMatrixJs(crosstabRows,{{target:2,var:3,entity:4,start:6}},['aud','share'])]}}
-function loadRankingsJs(currentBook,previousBook,limit=10){{const map={{globo:'Globo',record:'Record',sbt:'SBT',band:'BAND'}}, rankings={{}};for(const [key,sheet] of Object.entries(map)){{const cur=currentBook.sheets[sheet]||[], prev=previousBook.sheets[sheet]||[], prevBy={{}};for(const row of prev.slice(3))if(row[1])prevBy[row[1]]={{aud:fnumJs(row[2]),share:fnumJs(row[3])}};const currentRows=limit==null?cur.slice(3):cur.slice(3,3+limit);rankings[key]=currentRows.filter(r=>r[1]).map((row,idx)=>{{const aud=fnumJs(row[2]),share=fnumJs(row[3]),p=prevBy[row[1]]||{{}};const variation=(now,before)=>now===null||before===null||before===undefined||before===0?null:(now-before)/before*100;const audVar=variation(aud,p.aud), shareVar=variation(share,p.share);return {{rank:idx+1,program:row[1],aud,audPrev:p.aud,audVar,audStatus:statusFromVar(audVar),share,sharePrev:p.share,shareVar,shareStatus:statusFromVar(shareVar)}}}})}}return rankings}}
+function loadRankingsJs(currentBook,previousBook,limit=10,reportDate=''){{const map={{globo:'Globo',record:'Record',sbt:'SBT',band:'BAND'}}, rankings={{}},day=reportDate?new Date(reportDate+'T00:00:00').getDay():null,isWeekend=day===0||day===6;for(const [key,sheet] of Object.entries(map)){{const cur=currentBook.sheets[sheet]||[], prev=previousBook.sheets[sheet]||[], prevBy={{}};for(const row of prev.slice(3))if(row[1])prevBy[row[1]]={{aud:fnumJs(row[2]),share:fnumJs(row[3])}};const availableRows=cur.slice(3).filter(row=>row[1]&&!(isWeekend&&normalizeText(row[1]).startsWith('hora um'))),currentRows=limit==null?availableRows:availableRows.slice(0,limit);rankings[key]=currentRows.map((row,idx)=>{{const aud=fnumJs(row[2]),share=fnumJs(row[3]),p=prevBy[row[1]]||{{}};const variation=(now,before)=>now===null||before===null||before===undefined||before===0?null:(now-before)/before*100;const audVar=variation(aud,p.aud), shareVar=variation(share,p.share);return {{rank:idx+1,program:row[1],aud,audPrev:p.aud,audVar,audStatus:statusFromVar(audVar),share,sharePrev:p.share,shareVar,shareStatus:statusFromVar(shareVar)}}}})}}return rankings}}
 function buildDataFromBooks(books){{
   const byName=name=>books.find(b=>normalizeText(b.name).includes(normalizeText(name)));
   const minuteBook=byName('Base_aud_minuto');
@@ -1006,7 +1018,7 @@ function buildDataFromBooks(books){{
   }}
   const d=new Date(dateIso+'T00:00:00');
   const weekdays=['domingo','segunda-feira','ter\u00e7a-feira','quarta-feira','quinta-feira','sexta-feira','s\u00e1bado'];
-  return {{meta:{{date:dateIso,weekday:weekdays[d.getDay()],dailyAvg:fnumJs(row724[2])}},channels:DATA.channels,assets:DATA.assets,leadershipChannels:DATA.leadershipChannels,rankingChannels:DATA.rankingChannels,targets:DATA.targets,summaryBars,line,leadership,programs,programCompetition:competition,minuteAll:minutesAll,profile:profileData,rankings:loadRankingsJs(currentRank,previousRank),performanceRankings:loadRankingsJs(currentRank,previousRank,null)}};
+  return {{meta:{{date:dateIso,weekday:weekdays[d.getDay()],dailyAvg:fnumJs(row724[2])}},channels:DATA.channels,assets:DATA.assets,leadershipChannels:DATA.leadershipChannels,rankingChannels:DATA.rankingChannels,targets:DATA.targets,summaryBars,line,leadership,programs,programCompetition:competition,minuteAll:minutesAll,profile:profileData,rankings:loadRankingsJs(currentRank,previousRank,10,dateIso),performanceRankings:loadRankingsJs(currentRank,previousRank,null,dateIso)}};
 }}
 async function handleUploadedBases(fileList){{fileStatus.style.display='block';fileStatus.textContent='Lendo bases...';const books=[];for(const file of [...fileList]){{const lower=file.name.toLowerCase();if(lower.endsWith('.xlsx'))books.push(await readXlsxFile(file));else if(lower.endsWith('.zip')){{const pack=await JSZip.loadAsync(file);for(const entry of Object.values(pack.files)){{if(!entry.dir&&entry.name.toLowerCase().endsWith('.xlsx')){{const bytes=await entry.async('uint8array');books.push(await readXlsxFile(bytes,entry.name.split(/[\\/]/).pop()))}}}}}}}}DATA=buildDataFromBooks(books);fillSelect(programSelect,DATA.programs.map(p=>p.name));fillSelect(profileSelect,profileChoices());profileSelect.value='07h-24h';fillSelect(targetSelect,DATA.targets);fileStatus.textContent='Bases carregadas';revealDashboard()}}
 function activateTab(btn){{if(!btn||!btn.dataset||!btn.dataset.tab)return;document.querySelectorAll('.tabs .tab').forEach(b=>b.classList.remove('active'));document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));btn.classList.add('active');document.getElementById(btn.dataset.tab).classList.add('active');setTimeout(()=>{{renderResumo();renderProgramas();renderPerfil()}},0)}}
